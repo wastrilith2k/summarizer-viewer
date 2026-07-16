@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Summarizer</title>
+<style>
+  :root { --bg:#0B0F14; --card:#161D26; --border:#232D3A; --text:#E6EDF3; --dim:#8B98A5; --accent:#4C8DFF; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 22px; margin-bottom: 18px; }
+  h1 a { color: var(--text); text-decoration: none; }
+  .keylink { float: right; color: var(--dim); font-size: 12px; cursor: pointer; margin-top: 6px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .row { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .row:hover { border-color: var(--accent); }
+  .rowtitle { font-weight: 600; font-size: 16px; }
+  .meta { color: var(--dim); font-size: 13px; margin-top: 4px; }
+  .cloud { color: var(--dim); font-size: 13px; white-space: nowrap; }
+  .back { color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600; display: inline-block; margin-bottom: 14px; }
+  .times { display: flex; gap: 24px; margin-bottom: 4px; }
+  .tlabel { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .tval { font-size: 16px; font-weight: 600; margin-top: 2px; }
+  .divider { height: 1px; background: var(--border); margin: 14px 0; }
+  .summary { font-size: 15px; line-height: 1.55; white-space: pre-wrap; }
+  audio { width: 100%; margin-top: 14px; }
+  .section { color: var(--dim); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; margin: 22px 0 10px; }
+  .utt { margin-bottom: 14px; }
+  .utthead { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .chip { width: 22px; height: 22px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; color: #0B0F14; }
+  .ts { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .utttext { font-size: 15px; line-height: 1.5; margin-left: 30px; }
+  .empty { color: var(--dim); text-align: center; padding: 40px 0; }
+  .gate input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); padding: 11px 12px; font-size: 14px; margin: 12px 0; }
+  .gate button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 11px 22px; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .gate p { color: var(--dim); font-size: 13px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="keylink" onclick="changeKey()">change key</span><a href="#">&#9679; Summarizer</a></h1>
+  <div id="app"><div class="empty">Loading&hellip;</div></div>
+</div>
+<script>
+const BASE = 'https://xofwaqjwzyjjlurcyrpi.supabase.co';
+const SPEAKER_COLORS = ['#4C8DFF', '#F5A623', '#3ECF8E', '#E4649B', '#9B6DFF'];
+const app = document.getElementById('app');
+let conversations = [];
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const speakerLabel = (n) => String.fromCharCode(65 + (n % 26));
+const speakerColor = (n) => SPEAKER_COLORS[n % SPEAKER_COLORS.length];
+function clock(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = String(t % 60).padStart(2, '0');
+  return h > 0 ? h + ':' + String(m).padStart(2, '0') + ':' + s : m + ':' + s;
+}
+function duration(ms) {
+  const t = Math.max(0, Math.round(ms / 1000));
+  if (t < 60) return t + 's';
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60);
+  return h > 0 ? h + 'h ' + m + 'm' : m + 'm ' + (t % 60) + 's';
+}
+const dt = (e) => new Date(e).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const tm = (e) => new Date(e).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+const getKey = () => localStorage.getItem('sb_key') || '';
+function changeKey() { localStorage.removeItem('sb_key'); route(); }
+function saveKey() {
+  const v = document.getElementById('keyinput').value.trim();
+  if (v) { localStorage.setItem('sb_key', v); route(); }
+}
+function renderGate(msg) {
+  app.innerHTML =
+    '<div class="card gate">' +
+    '<div class="rowtitle">Connect to your backup</div>' +
+    '<p style="margin-top:8px">' + esc(msg || 'Paste the Supabase publishable key (starts with sb_publishable_) — the same one baked into the Summarizer app. It is remembered on this browser only.') + '</p>' +
+    '<input id="keyinput" placeholder="sb_publishable_..." autocomplete="off">' +
+    '<button onclick="saveKey()">Connect</button>' +
+    '</div>';
+}
+
+async function api(path) {
+  const key = getKey();
+  const res = await fetch(BASE + '/rest/v1/' + path, { headers: { apikey: key, Authorization: 'Bearer ' + key } });
+  if (res.status === 401 || res.status === 403) throw Object.assign(new Error('bad key'), { badKey: true });
+  if (!res.ok) throw new Error('API error ' + res.status);
+  return res.json();
+}
+
+async function renderList() {
+  conversations = await api('conversations?select=*&order=started_at.desc');
+  if (conversations.length === 0) { app.innerHTML = '<div class="empty">No conversations backed up yet.</div>'; return; }
+  app.innerHTML = conversations.map((c) =>
+    '<div class="card row" onclick="location.hash=\'#/c/' + c.id + '\'">' +
+      '<div><div class="rowtitle">' + esc(c.title || 'Untitled conversation') + '</div>' +
+      '<div class="meta">' + dt(c.started_at) + (c.ended_at ? ' &middot; ' + duration(c.ended_at - c.started_at) : '') + '</div></div>' +
+      (c.audio_url ? '<div class="cloud">&#127911;</div>' : '') +
+    '</div>'
+  ).join('');
+}
+
+async function renderDetail(id) {
+  const c = conversations.find((x) => x.id === id) || (await api('conversations?id=eq.' + id))[0];
+  if (!c) { app.innerHTML = '<div class="empty">Not found.</div>'; return; }
+  app.innerHTML = '<a class="back" href="#">&larr; All conversations</a><div class="empty">Loading&hellip;</div>';
+  const utts = await api('utterances?conversation_id=eq.' + id + '&order=idx');
+  app.innerHTML =
+    '<a class="back" href="#">&larr; All conversations</a>' +
+    '<div class="card">' +
+      '<div class="rowtitle" style="margin-bottom:12px">' + esc(c.title || 'Untitled conversation') + '</div>' +
+      '<div class="times">' +
+        '<div><div class="tlabel">Started</div><div class="tval">' + tm(c.started_at) + '</div></div>' +
+        '<div><div class="tlabel">Ended</div><div class="tval">' + (c.ended_at ? tm(c.ended_at) : '—') + '</div></div>' +
+        '<div><div class="tlabel">Duration</div><div class="tval">' + (c.ended_at ? duration(c.ended_at - c.started_at) : '—') + '</div></div>' +
+      '</div>' +
+      (c.summary ? '<div class="divider"></div><div class="summary">' + esc(c.summary) + '</div>' : '') +
+      (c.audio_url ? '<audio controls preload="none" src="' + esc(c.audio_url) + '"></audio>' : '') +
+    '</div>' +
+    (utts.length ? '<div class="section">Transcript</div>' + utts.map((u) =>
+      '<div class="utt"><div class="utthead">' +
+        '<div class="chip" style="background:' + speakerColor(u.speaker) + '">' + speakerLabel(u.speaker) + '</div>' +
+        '<span class="ts">' + clock(u.start_ms) + '</span></div>' +
+        '<div class="utttext">' + esc(u.text) + '</div></div>'
+    ).join('') : '');
+}
+
+async function route() {
+  if (!getKey()) { renderGate(); return; }
+  try {
+    const m = location.hash.match(/^#\/c\/(.+)$/);
+    if (m) await renderDetail(m[1]);
+    else await renderList();
+    window.scrollTo(0, 0);
+  } catch (e) {
+    if (e.badKey) { localStorage.removeItem('sb_key'); renderGate('That key was rejected — double-check and paste it again.'); }
+    else app.innerHTML = '<div class="empty">' + esc(e.message) + '</div>';
+  }
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
