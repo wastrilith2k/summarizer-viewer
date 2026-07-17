@@ -89,16 +89,33 @@ async function api(path) {
   return res.json();
 }
 
+let showArchived = false;
+function toggleArchived() { showArchived = !showArchived; renderListHtml(); }
+
+function cardHtml(c) {
+  return '<div class="card row" onclick="location.hash=\'#/c/' + c.id + '\'">' +
+    '<div><div class="rowtitle">' + esc(c.title || 'Untitled conversation') + '</div>' +
+    '<div class="meta">' + dt(c.started_at) + (c.ended_at ? ' &middot; ' + duration(c.ended_at - c.started_at) : '') + '</div></div>' +
+    (c.audio_url ? '<div class="cloud">&#127911;</div>' : '') +
+  '</div>';
+}
+
+function renderListHtml() {
+  const active = conversations.filter((c) => !c.archived_at);
+  const archived = conversations.filter((c) => c.archived_at);
+  let html = active.map(cardHtml).join('') || '<div class="empty">No active conversations.</div>';
+  if (archived.length) {
+    html += '<div class="section" style="cursor:pointer" onclick="toggleArchived()">' +
+      (showArchived ? '&#9662;' : '&#9656;') + ' Archived (' + archived.length + ')</div>' +
+      (showArchived ? archived.map(cardHtml).join('') : '');
+  }
+  app.innerHTML = html;
+}
+
 async function renderList() {
   conversations = await api('conversations?select=*&order=started_at.desc');
   if (conversations.length === 0) { app.innerHTML = '<div class="empty">No conversations backed up yet.</div>'; return; }
-  app.innerHTML = conversations.map((c) =>
-    '<div class="card row" onclick="location.hash=\'#/c/' + c.id + '\'">' +
-      '<div><div class="rowtitle">' + esc(c.title || 'Untitled conversation') + '</div>' +
-      '<div class="meta">' + dt(c.started_at) + (c.ended_at ? ' &middot; ' + duration(c.ended_at - c.started_at) : '') + '</div></div>' +
-      (c.audio_url ? '<div class="cloud">&#127911;</div>' : '') +
-    '</div>'
-  ).join('');
+  renderListHtml();
 }
 
 async function renderDetail(id) {
